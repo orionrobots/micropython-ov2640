@@ -6,7 +6,7 @@ import time
 import ubinascii
 import uos
 import gc
-import contextlib
+from . import contextlib
 
 
 def setup():
@@ -21,7 +21,6 @@ def i2c_dump(i2c):
     print('Devices detected on on i2c:')
     for a in addrs:
         print('0x%x' % a)
-
 
 class OvBus:
     def __init__(self, i2c, spi, cs_pin=5):
@@ -59,11 +58,6 @@ class OvBus:
         self.cs_pin.value(1)
         return buf
 
-    @contextlib.contextmanager
-    def select_spi(self):
-        self.cs_pin.value(0)
-        yield
-        self.cs_pin.value(1)
 
 class ov2640:
     def __init__(self, ov_bus, resolution=ov2640_lores_constants.OV2640_320x240_JPEG):
@@ -156,9 +150,10 @@ class ov2640:
         read_length = 0
         bp = 0
         last = 0
-        while True:
+        while read_length < bytes_available:
             # More than one data segment? Multi buffers...
-            if bp > (len(pic_buf) - 1):
+            if bp > (len(pic_buf) - 1) or (read_length + bp >= bytes_available):
+                print("Writing data chunk to file")
                 yield pic_buf, bp
                 read_length += bp
                 bp = 0
@@ -167,10 +162,12 @@ class ov2640:
             #print("read so far: %d, next byte: %s" % (read_length, ubinascii.hexlify(data)))
             pic_buf[bp] = data
             bp += 1
-            if last == b'\xff' and data == b'\xd9':
-                yield pic_buf, bp
-                read_length += bp
-                break
+            # if last == b'\xff' and data == b'\xd9':
+            #     yield pic_buf, bp
+            #     read_length += bp
+            #     break
+            # last = data
+
         print("read %d bytes from fifo, camera said %d were available" % (read_length, bytes_available))
 
     def wait_for_camera_ready(self):
@@ -208,11 +205,12 @@ class ov2640:
         self.ov_bus.i2c.writeto_mem(ov2640_constants.SENSORADDR, 0x09, b'\x00')
         self.standby = False
 
-    def append_buf(self, filename, picture, size):
+    def append_buf(self, filename, pict_buffer, size):
         try:
             f = open(filename, 'ab')
-            for element in picture[:size]:
-                f.write(bytes([element[0]]))
+            f.write(b''.join(pict_buffer[:size]))
+            # for element in picture[:size]:
+            #     f.write(bytes([element[0]]))
             f.close()
         except OSError:
             print("error writing file")
