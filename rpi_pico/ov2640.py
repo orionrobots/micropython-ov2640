@@ -58,6 +58,15 @@ class OvBus:
         self.cs_pin.value(1)
         return buf
 
+    def cam_spi_read_length(self, nbytes, address):
+        self.cs_pin.value(0)
+        maskbits = 0x7f
+        write_data = address & maskbits
+        self.hspi.write(bytes([write_data]))
+        result = self.hspi.read(nbytes, write_data)
+        self.cs_pin.value(1)
+        return result
+
 
 class ov2640:
     def __init__(self, ov_bus, resolution=ov2640_lores_constants.OV2640_320x240_JPEG):
@@ -113,15 +122,16 @@ class ov2640:
 
     def capture_to_file(self, file_name, overwrite):
         if overwrite:
-            #print("deleting old file %s" % file_name)
+            print("deleting old file %s" % file_name)
             try:
                 uos.remove(file_name)
             except OSError:
                 pass
         total = 0
-        for buffer, length in self.capture():
-            self.append_buf(file_name, buffer, length)
-            total += length
+        with open(file_name, 'ab') as fd:
+            for buffer, length in self.capture():
+                fd.write(buffer)
+                total += length
         return total
 
     def capture(self):
@@ -146,27 +156,15 @@ class ov2640:
         bytes_available = self.read_fifo_size()
         gc.collect()
 
-        pic_buf = [ b'\x00' ] * ov2640_constants.PICBUFSIZE
         read_length = 0
-        bp = 0
-        last = 0
         while read_length < bytes_available:
-            # More than one data segment? Multi buffers...
-            if bp > (len(pic_buf) - 1) or (read_length + bp >= bytes_available):
-                print("Writing data chunk to file")
-                yield pic_buf, bp
-                read_length += bp
-                bp = 0
-
-            data = self.ov_bus.cam_spi_read(b'\x3d')
-            #print("read so far: %d, next byte: %s" % (read_length, ubinascii.hexlify(data)))
-            pic_buf[bp] = data
-            bp += 1
-            # if last == b'\xff' and data == b'\xd9':
-            #     yield pic_buf, bp
-            #     read_length += bp
-            #     break
-            # last = data
+            to_read_length = min(ov2640_constants.PICBUFSIZE, bytes_available - read_length)
+            print("Reading %s bytes, read %s bytes" % (to_read_length, read_length))
+            data = self.ov_bus.cam_spi_read_length(to_read_length, 0x3d)
+            if b'JFIF' in data:
+                print(ubinascii.hexlify(data[:32], ' '))
+            yield data, to_read_length
+            read_length += to_read_length
 
         print("read %d bytes from fifo, camera said %d were available" % (read_length, bytes_available))
 
@@ -204,17 +202,6 @@ class ov2640:
         # standby mode
         self.ov_bus.i2c.writeto_mem(ov2640_constants.SENSORADDR, 0x09, b'\x00')
         self.standby = False
-
-    def append_buf(self, filename, pict_buffer, size):
-        try:
-            f = open(filename, 'ab')
-            f.write(b''.join(pict_buffer[:size]))
-            # for element in picture[:size]:
-            #     f.write(bytes([element[0]]))
-            f.close()
-        except OSError:
-            print("error writing file")
-            print("write %d bytes from buffer" % size)
 
 
 # cam driver code
