@@ -7,11 +7,12 @@ import ubinascii
 import uos
 import gc
 from . import contextlib
+from micropython import const
 
 
 def setup():
     i2c = machine.I2C(0, scl=machine.Pin(1), sda=machine.Pin(0), freq=1000000)
-    br = 8 * 1000*1000
+    br = const(8 * 1000*1000)
     spi = machine.SPI(0, baudrate=2 * 1000 * 1000, polarity=0, phase=0,
                       mosi=machine.Pin(3), miso=machine.Pin(4), sck=machine.Pin(2))
     return i2c, spi
@@ -60,7 +61,7 @@ class OvBus:
 
     def cam_spi_read_length(self, nbytes, address):
         self.cs_pin.value(0)
-        maskbits = 0x7f
+        maskbits = const(0x7f)
         write_data = address & maskbits
         self.hspi.write(bytes([write_data]))
         result = self.hspi.read(nbytes, write_data)
